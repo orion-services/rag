@@ -59,7 +59,7 @@ ollama pull all-minilm:33m
 ollama serve
 
 # Clone o repositório
-git clone (https://github.com/rodrigoprestesmachado/rag
+git clone https://github.com/rodrigoprestesmachado/rag.git
 cd rag
 ```
 
@@ -82,7 +82,7 @@ gerenciar esses containers.
 
 ### Interface com o Usuário
 
-Se voce quiser testar a interface do chat, basta pressionar a tecla `w` no
+Se você quiser testar a interface do chat, basta pressionar a tecla `w` no
 terminal quando a aplicação estiver em execução que o Quarkus irá abrir a
 interface web no endereço e porta: <http://localhost:8080/>.
 
@@ -237,7 +237,7 @@ Coordena a interação entre o domínio e o mundo externo:
 Implementa os detalhes técnicos e integrações externas:
 
 - **Adaptadores**: Implementações concretas das portas
-(`AIServiceAdapter`, `PersonalizedAIService`)
+(`AIServiceAdapter`, `LangChainAIService`)
 - **Repositórios**: Implementa a persistência de dados. Nesta aplicação, os
 repositórios são responsáveis por armazenar e recuperar informações de
 embeddings e também o histórico de uma conversa (`EmbeddingRepositoryImpl`,
@@ -377,9 +377,6 @@ curl "http://localhost:8080/ai/ask?session=user123&prompt=O que é Vue.js?"
 ```bash
 # Obter histórico da conversa
 curl "http://localhost:8080/ai/memory?session=user123"
-
-# Limpar memória da sessão
-curl -X DELETE "http://localhost:8080/ai/memory?session=user123"
 ```
 
 ### Exemplos de Uso
@@ -414,10 +411,12 @@ quarkus.http.port=8080
 quarkus.langchain4j.ollama.base-url=http://localhost:11434/
 quarkus.langchain4j.ollama.chat-model.model-id=gemma3:1b
 quarkus.langchain4j.ollama.embedding-model.model-id=all-minilm:33m
+quarkus.langchain4j.ollama.devservices.enabled=false
 
 # Configuração RAG
 rag.location=src/main/resources/rag
 rag.context=Vue.js
+quarkus.langchain4j.embedding-model.provider=ollama
 
 # Chroma (Banco Vetorial)
 quarkus.langchain4j.chroma.collection-name=chatbot
