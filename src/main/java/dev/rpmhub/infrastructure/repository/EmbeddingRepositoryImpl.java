@@ -116,13 +116,6 @@ public class EmbeddingRepositoryImpl implements EmbeddingRepository {
 
                         Log.info("Total de documentos processados: " + documents.size());
 
-                        if (!documents.isEmpty()) {
-                                Log.info("Primeiro documento: "
-                                                + documents.get(0).text().substring(0,
-                                                                Math.min(200, documents.get(0).text().length()))
-                                                + "...");
-                        }
-
                         EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder()
                                         .embeddingStore(embeddingStore)
                                         .embeddingModel(embeddingModel)

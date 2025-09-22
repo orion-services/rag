@@ -38,8 +38,6 @@ public class PDFExtractorService {
             if (!document.isEncrypted()) {
                 PDFTextStripper stripper = new PDFTextStripper();
                 text = stripper.getText(document);
-                Log.info("Texto extraído do PDF:");
-                Log.info(text);
             } else {
                 Log.error("O documento está criptografado.");
             }

@@ -4,6 +4,12 @@ Este projeto implementa um sistema RAG (Retrieval-Augmented Generation)
 utilizando Quarkus, LangChain4j e Ollama para criar um chatbot inteligente que
 pode responder perguntas baseadas em documentos ingeridos.
 
+## Diretório do RAG
+
+O diretório `src/main/resources/rag` contém documentos de exemplo para
+ingestão e teste do sistema. Você pode adicionar seus próprios documentos neste
+diretório para expandir o conhecimento do chatbot.
+
 ## 🛠️ Tecnologias Utilizadas
 
 - **Java 21** - Linguagem de programação
@@ -53,8 +59,8 @@ ollama pull all-minilm:33m
 ollama serve
 
 # Clone o repositório
-git clone <repository-url>
-cd rag-test
+git clone (https://github.com/rodrigoprestesmachado/rag
+cd rag
 ```
 
 ## 🔧 Execução Local
@@ -67,14 +73,18 @@ Execute a aplicação em modo de desenvolvimento com live reload:
 ./mvnw quarkus:dev
 ```
 
-Nota: o Chroma e o Redis serão iniciados automaticamente via Dev Services do
-Quarkus.
+***Nota:*** o Chroma e o Redis serão iniciados automaticamente via Dev Services do
+Quarkus. O Dev Services é uma funcionalidade do Quarkus que facilita o
+desenvolvimento local, iniciando automaticamente serviços como bancos de dados,
+filas de mensagens, caches, entre outros, sem a necessidade de configuração.
+Porém, é necessário ter o Docker instalado para que o Quarkus possa criar e
+gerenciar esses containers.
 
 ### Interface com o Usuário
 
 Se voce quiser testar a interface do chat, basta pressionar a tecla `w` no
 terminal quando a aplicação estiver em execução que o Quarkus irá abrir a
-interface web no endereço e porta <http://localhost:8080/>.
+interface web no endereço e porta: <http://localhost:8080/>.
 
 ### Modo de Produção
 
@@ -101,12 +111,12 @@ java -jar target/*-runner.jar
 ./mvnw package
 
 # Build da imagem Docker
-docker build -f src/main/docker/Dockerfile.jvm -t rag-test:jvm .
+docker build -f src/main/docker/Dockerfile.jvm -t rag:jvm .
 
 # Executar container
 docker run -i --rm -p 8080:8080 \
   -e QUARKUS_LANGCHAIN4J_OLLAMA_BASE_URL=http://host.docker.internal:11434/ \
-  rag-test:jvm
+  rag:jvm
 ```
 
 ### Opção 2: Executável Nativo
@@ -116,12 +126,12 @@ docker run -i --rm -p 8080:8080 \
 ./mvnw package -Dnative -Dquarkus.native.container-build=true
 
 # Build da imagem Docker
-docker build -f src/main/docker/Dockerfile.native -t rag-test:native .
+docker build -f src/main/docker/Dockerfile.native -t rag:native .
 
 # Executar container
 docker run -i --rm -p 8080:8080 \
   -e QUARKUS_LANGCHAIN4J_OLLAMA_BASE_URL=http://host.docker.internal:11434/ \
-  rag-test:native
+  rag:native
 ```
 
 ### Opção 3: Docker Compose (Recomendado)
@@ -131,7 +141,7 @@ Crie um arquivo `docker-compose.yml`:
 ```yaml
 version: '3.8'
 services:
-  rag-test:
+  rag:
     build:
       context: .
       dockerfile: src/main/docker/Dockerfile.jvm
@@ -162,7 +172,8 @@ docker-compose up -d
 
 ## 🏗️ Arquitetura
 
-O projeto segue os princípios da **Arquitetura Hexagonal (Clean Architecture)**, organizando o código em camadas bem definidas:
+O projeto segue os princípios da **Arquitetura Hexagonal (Clean Architecture)**,
+organizando o código em camadas bem definidas:
 
 ### Estrutura do Projeto
 
@@ -184,7 +195,10 @@ src/main/java/dev/rpmhub/
 
 ### Princípios da Arquitetura Hexagonal
 
-A **Arquitetura Hexagonal** (também conhecida como **Ports and Adapters**) é um padrão arquitetural que promove a separação de responsabilidades e o baixo acoplamento entre as camadas da aplicação. Este projeto implementa os seguintes conceitos:
+A **Arquitetura Hexagonal** (também conhecida como **Ports and Adapters**) é um
+padrão arquitetural que promove a separação de responsabilidades e o baixo
+acoplamento entre as camadas da aplicação. Este projeto implementa os seguintes
+conceitos:
 
 #### 🔹 **Camada de Domínio (Core)**
 
