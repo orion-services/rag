@@ -7,22 +7,52 @@
  */
 package dev.rpmhub.domain.model;
 
-import java.time.LocalDateTime;
-
+import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.time.LocalDateTime;
+
 /**
  * Represents a chat message in the conversation memory.
  */
-@Getter @Setter @ToString
+@Entity
+@Table(name = "chat_messages")
+@Getter @Setter @ToString(exclude = {"conversation", "user"})
 public class ChatMessage {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
+    
+    // Campos para compatibilidade com código existente
+    @Column(name = "session_id")
     private String sessionId;
+    
+    @Column(name = "user_id")
+    private String userId;
+    
+    @Column(name = "conversation_id")
+    private String conversationId;
+    
+    // Relacionamentos JPA
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "conversation_id", insertable = false, updatable = false)
+    private Conversation conversation;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
+    private User user;
+    
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
     private MessageType type;
+    
+    @Column(nullable = false)
     private LocalDateTime timestamp;
 
     public ChatMessage() {
@@ -34,6 +64,22 @@ public class ChatMessage {
         this.sessionId = sessionId;
         this.content = content;
         this.type = type;
+    }
+    
+    public ChatMessage(String userId, String conversationId, String content, MessageType type) {
+        this();
+        this.userId = userId;
+        this.conversationId = conversationId;
+        this.sessionId = conversationId; // Para compatibilidade
+        this.content = content;
+        this.type = type;
+    }
+
+    @PrePersist
+    protected void onCreate() {
+        if (timestamp == null) {
+            timestamp = LocalDateTime.now();
+        }
     }
 
     public enum MessageType {
