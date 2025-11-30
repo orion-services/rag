@@ -33,14 +33,12 @@ public class JwtAuthFilter implements ContainerRequestFilter {
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String jwtToken = authHeader.substring(7);
             
-            // Synchronize user from JWT token asynchronously (fire and forget)
-            // The security layer will validate the JWT, we just sync the user
-            // This doesn't block the request
-            authService.syncUserFromJwt(jwtToken)
-                .subscribe().with(
-                    user -> Log.debug("User synchronized from JWT token: " + (user != null ? user.getId() : "null")),
-                    failure -> Log.warn("Failed to synchronize user from JWT token: " + failure.getMessage())
-                );
+            // Store JWT token in request context for later use by endpoints
+            // The synchronization will be done lazily in the endpoints that need it
+            // This avoids reactive context conflicts
+            requestContext.setProperty("jwt.token", jwtToken);
+            
+            Log.debug("JWT token stored in request context");
         }
     }
 }

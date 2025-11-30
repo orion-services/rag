@@ -68,6 +68,7 @@
 <script>
 import { orionUsersService } from '../services/orionUsers';
 import { authService } from '../services/auth';
+import { useAuthStore } from '../stores/auth';
 import TwoFactorAuth from './TwoFactorAuth.vue';
 
 export default {
@@ -114,12 +115,36 @@ export default {
 
         // Login bem-sucedido
         if (response.authentication && response.authentication.token) {
-          authService.setToken(response.authentication.token);
-          if (response.user) {
-            authService.setUser(response.user);
+          const token = response.authentication.token;
+          const user = response.authentication.user; // Usuário está dentro de authentication
+          
+          // Criar objeto de usuário com id baseado no hash
+          const userData = user ? {
+            ...user,
+            id: user.hash || user.email // Usar hash como id, ou email como fallback
+          } : null;
+          
+          console.log('Login bem-sucedido. Token:', token ? 'recebido' : 'não recebido');
+          console.log('Usuário:', userData);
+          
+          // Atualizar authService (localStorage)
+          authService.setToken(token);
+          if (userData) {
+            authService.setUser(userData);
           }
           
-          this.$router.push('/chat');
+          // Atualizar authStore (Pinia) para sincronizar com o guard de navegação
+          const authStore = useAuthStore();
+          authStore.setToken(token);
+          if (userData) {
+            authStore.setUser(userData);
+          }
+          
+          // Aguardar um pouco para garantir que o store foi atualizado
+          await this.$nextTick();
+          
+          // Redirecionar para conversas
+          this.$router.push('/conversations');
         } else {
           this.error = 'Erro ao fazer login. Tente novamente.';
         }
@@ -131,11 +156,33 @@ export default {
       }
     },
 
-    handle2FAAuthenticated(token, user) {
+    async handle2FAAuthenticated(token, user) {
+      // Criar objeto de usuário com id baseado no hash
+      const userData = user ? {
+        ...user,
+        id: user.hash || user.email // Usar hash como id, ou email como fallback
+      } : null;
+      
+      console.log('2FA autenticado. Token:', token ? 'recebido' : 'não recebido');
+      console.log('Usuário:', userData);
+      
+      // Atualizar authService (localStorage)
       authService.setToken(token);
-      if (user) {
-        authService.setUser(user);
+      if (userData) {
+        authService.setUser(userData);
       }
+      
+      // Atualizar authStore (Pinia) para sincronizar com o guard de navegação
+      const authStore = useAuthStore();
+      authStore.setToken(token);
+      if (userData) {
+        authStore.setUser(userData);
+      }
+      
+      // Aguardar um pouco para garantir que o store foi atualizado
+      await this.$nextTick();
+      
+      // Redirecionar para chat
       this.$router.push('/chat');
     }
   }

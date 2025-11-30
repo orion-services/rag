@@ -19,8 +19,8 @@
         Registrar
       </v-btn>
     </v-app-bar>
-    <v-main>
-      <router-view></router-view>
+    <v-main class="fill-height" style="height: calc(100vh - 64px); overflow: hidden;">
+      <router-view style="height: 100%;"></router-view>
     </v-main>
   </v-app>
 </template>

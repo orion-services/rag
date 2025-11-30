@@ -33,22 +33,26 @@ public class UserServiceImpl implements UserService {
     public Uni<User> createUser(String username, String email) {
         // Verificar se username já existe
         return userRepository.findByUsername(username)
-            .onItem().ifNotNull().failWith(() -> new IllegalArgumentException("Username já existe"))
-            .onItem().ifNull().continueWith(() -> (User) null)
-            .chain(ignored -> {
+            .onItem().transformToUni(existingUser -> {
+                if (existingUser != null) {
+                    return Uni.createFrom().failure(new IllegalArgumentException("Username já existe"));
+                }
+                
                 // Verificar se email já existe
-                return userRepository.findByEmail(email);
-            })
-            .onItem().ifNotNull().failWith(() -> new IllegalArgumentException("Email já existe"))
-            .onItem().ifNull().continueWith(() -> (User) null)
-            .chain(ignored -> {
-                // Criar novo usuário
-                User user = new User();
-                user.setUsername(username);
-                user.setEmail(email);
-                return userRepository.persist(user)
-                    .chain(() -> userRepository.flush())
-                    .replaceWith(user);
+                return userRepository.findByEmail(email)
+                    .onItem().transformToUni(existingEmail -> {
+                        if (existingEmail != null) {
+                            return Uni.createFrom().failure(new IllegalArgumentException("Email já existe"));
+                        }
+                        
+                        // Criar novo usuário
+                        User user = new User();
+                        user.setUsername(username);
+                        user.setEmail(email);
+                        return userRepository.persist(user)
+                            .onItem().transformToUni(persisted -> 
+                                userRepository.flush().replaceWith(persisted));
+                    });
             });
     }
     
@@ -74,10 +78,9 @@ public class UserServiceImpl implements UserService {
     public Uni<Void> updateUser(User user) {
         return userRepository.findById(user.getId())
             .onItem().ifNull().failWith(() -> new IllegalArgumentException("Usuário não encontrado"))
-            .chain(() -> {
+            .onItem().transformToUni(existingUser -> {
                 return userRepository.persist(user)
-                    .chain(() -> userRepository.flush())
-                    .replaceWithVoid();
+                    .onItem().transformToUni(u -> userRepository.flush());
             });
     }
     
@@ -85,13 +88,14 @@ public class UserServiceImpl implements UserService {
     public Uni<Void> deleteUser(String userId) {
         return userRepository.findById(userId)
             .onItem().ifNull().failWith(() -> new IllegalArgumentException("Usuário não encontrado"))
-            .chain(() -> userRepository.deleteById(userId)
-                .chain(deleted -> {
-                    if (!deleted) {
-                        return Uni.createFrom().failure(new IllegalArgumentException("Usuário não encontrado"));
-                    }
-                    return userRepository.flush();
-                }));
+            .onItem().transformToUni(existingUser -> 
+                userRepository.deleteById(userId)
+                    .onItem().transformToUni(deleted -> {
+                        if (!deleted) {
+                            return Uni.createFrom().failure(new IllegalArgumentException("Usuário não encontrado"));
+                        }
+                        return userRepository.flush();
+                    }));
     }
     
     @Override

@@ -6,7 +6,13 @@
           <v-card-title class="d-flex align-center">
             <span>Minhas Conversas</span>
             <v-spacer></v-spacer>
-            <v-btn color="primary" @click="createNewConversation">
+            <v-btn 
+              type="button"
+              color="primary" 
+              @click.stop.prevent="createNewConversation"
+              :loading="creatingConversation"
+              :disabled="creatingConversation"
+            >
               <v-icon left>mdi-plus</v-icon>
               Nova Conversa
             </v-btn>
@@ -39,6 +45,25 @@
             </div>
           </v-card-text>
         </v-card>
+        
+        <!-- Snackbar para erros -->
+        <v-snackbar
+          v-model="showError"
+          color="error"
+          :timeout="5000"
+          top
+        >
+          {{ errorMessage }}
+          <template v-slot:action="{ attrs }">
+            <v-btn
+              text
+              v-bind="attrs"
+              @click="showError = false"
+            >
+              Fechar
+            </v-btn>
+          </template>
+        </v-snackbar>
       </v-col>
     </v-row>
   </v-container>
@@ -58,7 +83,10 @@ export default {
     return {
       conversations: [],
       loading: false,
-      search: ''
+      search: '',
+      creatingConversation: false,
+      showError: false,
+      errorMessage: ''
     };
   },
   computed: {
@@ -93,8 +121,57 @@ export default {
       }
     },
 
-    async createNewConversation() {
-      this.$router.push('/chat');
+    async createNewConversation(event) {
+      // Prevenir comportamento padrão (navegação, submit, etc)
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }
+
+      const user = authService.getUser();
+      if (!user || !user.id) {
+        this.$router.push('/login');
+        return;
+      }
+
+      this.creatingConversation = true;
+      this.showError = false;
+      this.errorMessage = '';
+
+      try {
+        console.log('Criando nova conversa para usuário:', user.id);
+        // Criar conversa no banco de dados antes de navegar
+        const conversation = await apiService.createConversation(user.id, 'Nova Conversa');
+        console.log('Conversa criada com sucesso:', conversation);
+        console.log('Tipo da resposta:', typeof conversation);
+        console.log('ID da conversa:', conversation?.id);
+        
+        // Validar resposta
+        if (!conversation) {
+          throw new Error('Resposta vazia do servidor');
+        }
+        
+        if (!conversation.id) {
+          console.error('Resposta sem ID:', conversation);
+          throw new Error('Resposta inválida do servidor: conversa criada sem ID');
+        }
+        
+        // Navegar para a tela de chat com o ID da conversa criada
+        const chatRoute = `/chat/${conversation.id}`;
+        console.log('Navegando para:', chatRoute);
+        await this.$router.push(chatRoute);
+        console.log('Navegação concluída');
+      } catch (error) {
+        console.error('Erro ao criar nova conversa:', error);
+        console.error('Stack trace:', error.stack);
+        const errorMsg = error.message || error.response?.data?.message || 'Erro ao criar conversa. Tente novamente.';
+        this.errorMessage = errorMsg;
+        this.showError = true;
+        // Não navegar em caso de erro - deixar o usuário na página de conversas
+      } finally {
+        this.creatingConversation = false;
+      }
     },
 
     handleSelect(conversationId) {

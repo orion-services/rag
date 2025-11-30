@@ -11,6 +11,7 @@ import dev.rpmhub.domain.model.User;
 import dev.rpmhub.domain.port.AuthService;
 import dev.rpmhub.domain.port.UserRepository;
 import dev.rpmhub.domain.port.UserService;
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -51,17 +52,11 @@ public class AuthServiceImpl implements AuthService {
             // Parse JSON payload to extract hash
             JsonNode jsonNode = objectMapper.readTree(payload);
             
-            // Try to get hash from various possible claims
-            if (jsonNode.has("hash")) {
-                return jsonNode.get("hash").asText();
-            } else if (jsonNode.has("sub")) {
-                // Use sub claim as hash (common in JWT)
-                return jsonNode.get("sub").asText();
-            } else if (jsonNode.has("userHash")) {
-                return jsonNode.get("userHash").asText();
+            if (!jsonNode.has("c_hash")) {
+                throw new IllegalArgumentException("Hash not found in JWT token. Available claims: " + jsonNode.fieldNames());
             }
             
-            throw new IllegalArgumentException("Hash not found in JWT token. Available claims: " + jsonNode.fieldNames());
+            return jsonNode.get("c_hash").asText();
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to extract hash from JWT token", e);
         }
@@ -91,34 +86,40 @@ public class AuthServiceImpl implements AuthService {
     }
     
     @Override
+    @WithTransaction
     public Uni<User> syncUserFromJwt(String jwtToken) {
         String orionUserHash = extractUserHashFromJwt(jwtToken);
         String email = extractEmailFromJwt(jwtToken);
         
         // Try to find existing user by hash
         return userRepository.findByOrionUserHash(orionUserHash)
-            .onItem().ifNotNull().transform(user -> user)
-            .onItem().ifNull().switchTo(() -> {
-                // User doesn't exist, try to find by email first
+            .onItem().transformToUni(user -> {
+                if (user != null) {
+                    // User found by hash, return it
+                    return Uni.createFrom().item(user);
+                }
+                
+                // User doesn't exist by hash, try to find by email
                 return userRepository.findByEmail(email)
-                    .onItem().ifNotNull().transform(user -> {
-                        // User exists but doesn't have hash, update it
-                        user.setOrionUserHash(orionUserHash);
-                        return user;
-                    })
-                    .onItem().call(user -> userRepository.persist(user).chain(() -> userRepository.flush()))
-                    .onItem().ifNull().switchTo(() -> {
+                    .onItem().transformToUni(userByEmail -> {
+                        if (userByEmail != null) {
+                            // User exists but doesn't have hash, update it
+                            userByEmail.setOrionUserHash(orionUserHash);
+                            return userRepository.persist(userByEmail)
+                                .onItem().transformToUni(u -> userRepository.flush().replaceWith(u));
+                        }
+                        
                         // User doesn't exist at all, create new user
                         // Use email prefix as username
                         String username = email.split("@")[0];
                         
                         return userService.createUser(username, email)
-                            .onItem().transform(user -> {
+                            .onItem().transformToUni(newUser -> {
                                 // Set hash for new user
-                                user.setOrionUserHash(orionUserHash);
-                                return user;
-                            })
-                            .onItem().call(user -> userRepository.persist(user).chain(() -> userRepository.flush()));
+                                newUser.setOrionUserHash(orionUserHash);
+                                return userRepository.persist(newUser)
+                                    .onItem().transformToUni(u -> userRepository.flush().replaceWith(u));
+                            });
                     });
             });
     }

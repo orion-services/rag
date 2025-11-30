@@ -20,6 +20,8 @@ import dev.rpmhub.domain.port.ConversationRepository;
 import dev.rpmhub.domain.port.ConversationService;
 import dev.rpmhub.domain.port.MemoryService;
 import dev.rpmhub.domain.port.UserRepository;
+import io.quarkus.hibernate.reactive.panache.common.WithSession;
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
 import io.quarkus.logging.Log;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
@@ -42,6 +44,7 @@ public class MemoryServiceImpl implements MemoryService {
     private final ConversationRepository conversationRepository;
     private final ConversationService conversationService;
     private final UserRepository userRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final int defaultMaxMessages;
     private final int ttlHours;
 
@@ -50,29 +53,32 @@ public class MemoryServiceImpl implements MemoryService {
             ConversationRepository conversationRepository,
             ConversationService conversationService,
             UserRepository userRepository,
+            ChatMessageRepository chatMessageRepository,
             @ConfigProperty(name = "memory.default.max-messages", defaultValue = "50") int defaultMaxMessages,
             @ConfigProperty(name = "memory.ttl.hours", defaultValue = "24") int ttlHours) {
         this.reactiveRedisDataSource = reactiveRedisDataSource;
         this.conversationRepository = conversationRepository;
         this.conversationService = conversationService;
         this.userRepository = userRepository;
+        this.chatMessageRepository = chatMessageRepository;
         this.defaultMaxMessages = defaultMaxMessages;
         this.ttlHours = ttlHours;
     }
 
     @Override
     public Uni<Void> saveMessage(ChatMessage message) {
-        // Generate ID if not set
-        if (message.getId() == null || message.getId().isEmpty()) {
-            message.setId(UUID.randomUUID().toString());
-        }
-        
         // Se tem userId e conversationId, usar novo fluxo híbrido
+        // NÃO gerar ID aqui para o fluxo híbrido - deixar o Hibernate gerar
         if (message.getUserId() != null && message.getConversationId() != null) {
             return saveMessageHybrid(message);
         }
         
         // Fluxo antigo para compatibilidade (apenas Redis)
+        // Generate ID if not set (apenas para Redis)
+        if (message.getId() == null || message.getId().isEmpty()) {
+            message.setId(UUID.randomUUID().toString());
+        }
+        
         String key = CONVERSATION_PREFIX + message.getSessionId();
         return getConversationMemory(message.getSessionId())
                 .onItem().ifNull()
@@ -90,65 +96,69 @@ public class MemoryServiceImpl implements MemoryService {
                 .replaceWithVoid();
     }
     
-    private Uni<Void> saveMessageHybrid(ChatMessage message) {
-        // 1. Verificar acesso do usuário à conversa
-        return conversationService.userHasAccess(message.getUserId(), message.getConversationId())
-            .<Void>chain(hasAccess -> {
+    @WithTransaction
+    public Uni<Void> saveMessageHybrid(ChatMessage message) {
+        // 1. Verificar acesso do usuário à conversa (apenas para mensagens USER)
+        Uni<Boolean> accessCheck;
+        if (message.getType() == ChatMessage.MessageType.USER && message.getUserId() != null) {
+            accessCheck = conversationService.userHasAccess(message.getUserId(), message.getConversationId());
+        } else {
+            // Mensagens ASSISTANT e SYSTEM não precisam de verificação de acesso
+            accessCheck = Uni.createFrom().item(true);
+        }
+        
+        return accessCheck
+            .chain(hasAccess -> {
                 if (!hasAccess) {
                     return Uni.createFrom().failure(new SecurityException("Usuário não tem acesso a esta conversa"));
                 }
                 
                 // 2. Salvar no MySQL (persistência permanente)
+                // Buscar conversa para verificar existência e obter referência
                 return conversationRepository.findById(message.getConversationId())
                     .onItem().ifNull().failWith(() -> new IllegalArgumentException("Conversa não encontrada"))
-                    .<Void>chain(conversation -> {
+                    .chain(conversation -> {
                         // Configurar relacionamentos
                         message.setConversationId(conversation.getId());
                         message.setSessionId(conversation.getId()); // Para compatibilidade
                         
+                        // Remover ID se existir para garantir que seja uma nova entidade
+                        // O Hibernate gerará o ID automaticamente via @GeneratedValue
+                        message.setId(null);
+                        
                         // Buscar usuário se for mensagem de usuário
                         if (message.getType() == ChatMessage.MessageType.USER && message.getUserId() != null) {
+                            // Tentar buscar pelo ID primeiro
                             return userRepository.findById(message.getUserId())
+                                .onItem().ifNull().switchTo(() -> {
+                                    // Se não encontrar pelo ID, tentar buscar pelo hash (compatibilidade)
+                                    return userRepository.findByOrionUserHash(message.getUserId());
+                                })
                                 .chain(user -> {
+                                    if (user == null) {
+                                        return Uni.createFrom().failure(new IllegalArgumentException("Usuário não encontrado: " + message.getUserId()));
+                                    }
+                                    // Garantir que o userId na mensagem seja o ID do banco, não o hash
+                                    message.setUserId(user.getId());
                                     message.setUser(user);
-                                    // Adicionar mensagem à conversa
-                                    conversation.getMessages().add(message);
-                                    return conversationRepository.persist(conversation)
+                                    // Persistir mensagem diretamente em vez de usar cascade
+                                    return chatMessageRepository.persist(message)
                                         .chain(() -> conversationRepository.flush());
                                 });
                         } else {
-                            // Mensagem do assistente ou sistema
-                            conversation.getMessages().add(message);
-                            return conversationRepository.persist(conversation)
+                            // Mensagem do assistente ou sistema - não deve ter user_id
+                            message.setUserId(null);
+                            message.setUser(null);
+                            // Persistir mensagem diretamente em vez de usar cascade
+                            return chatMessageRepository.persist(message)
                                 .chain(() -> conversationRepository.flush());
                         }
-                    })
-                    .chain(ignored -> {
-                        // 3. Atualizar cache no Redis (performance)
-                        String redisKey = MEMORY_PREFIX + message.getConversationId();
-                        return getConversationMemoryFromRedis(redisKey)
-                            .onItem().ifNull().continueWith(() -> (ConversationMemory) null)
-                            .chain(mem -> {
-                                // Se não estiver no cache, buscar do MySQL
-                                if (mem == null) {
-                                    return loadConversationMemoryFromDB(message.getConversationId());
-                                }
-                                return Uni.createFrom().item(mem);
-                            })
-                            .chain(memory -> {
-                                ConversationMemory mem = memory;
-                                if (mem == null) {
-                                    mem = new ConversationMemory(message.getUserId(), message.getConversationId(), defaultMaxMessages);
-                                }
-                                mem.addMessage(message);
-                                ReactiveValueCommands<String, ConversationMemory> valueCommands = 
-                                    reactiveRedisDataSource.value(ConversationMemory.class);
-                                return valueCommands.setex(redisKey, ttlHours * 3600L, mem);
-                            });
-                    })
-                    .replaceWithVoid();
+                    });
             })
-            .onFailure().invoke(e -> Log.error("Error saving message: " + e.getMessage(), e));
+            .onFailure().invoke(e -> Log.error("Error saving message to database: " + e.getMessage(), e))
+            .replaceWithVoid();
+            // Nota: Cache Redis será atualizado na próxima leitura (lazy update)
+            // Isso evita problemas de contexto de thread após @WithTransaction
     }
 
     /**
@@ -185,29 +195,23 @@ public class MemoryServiceImpl implements MemoryService {
      * @return a Uni containing the conversation memory, or null if not found
      */
     @Override
+    @WithSession
     public Uni<ConversationMemory> getConversationMemory(String userId, String conversationId) {
         String redisKey = MEMORY_PREFIX + conversationId;
         
         // Tentar buscar do cache primeiro
         return getConversationMemoryFromRedis(redisKey)
-            .onItem().ifNull().continueWith(() -> (ConversationMemory) null)
-            .chain(mem -> {
-                // Se não estiver no cache, buscar do MySQL
-                if (mem == null) {
-                    return loadConversationMemoryFromDB(conversationId)
-                        .chain(memory -> {
-                            if (memory != null) {
-                                // Salvar no cache para próximas consultas
-                                ReactiveValueCommands<String, ConversationMemory> valueCommands = 
-                                    reactiveRedisDataSource.value(ConversationMemory.class);
-                                return valueCommands.setex(redisKey, ttlHours * 3600L, memory)
-                                    .replaceWith(memory);
-                            }
-                            return Uni.createFrom().nullItem();
-                        });
-                }
-                return Uni.createFrom().item(mem);
-            })
+            .onItem().ifNull().switchTo(() -> loadConversationMemoryFromDB(conversationId)
+                .chain(memory -> {
+                    if (memory != null) {
+                        // Salvar no cache para próximas consultas
+                        ReactiveValueCommands<String, ConversationMemory> valueCommands = 
+                            reactiveRedisDataSource.value(ConversationMemory.class);
+                        return valueCommands.setex(redisKey, ttlHours * 3600L, memory)
+                            .replaceWith(memory);
+                    }
+                    return Uni.createFrom().nullItem();
+                }))
             .onFailure().recoverWithNull();
     }
     
@@ -217,25 +221,31 @@ public class MemoryServiceImpl implements MemoryService {
         return valueCommands.get(key);
     }
     
-    private Uni<ConversationMemory> loadConversationMemoryFromDB(String conversationId) {
+    @WithSession
+    protected Uni<ConversationMemory> loadConversationMemoryFromDB(String conversationId) {
         return conversationRepository.findById(conversationId)
-            .onItem().ifNull().continueWith(() -> (Conversation) null)
-            .map(conversation -> {
-                if (conversation == null) {
-                    return null;
-                }
+            .onItem().ifNotNull().transform(conversation -> {
+                // Criar ConversationMemory mesmo se a conversa não tiver mensagens ainda
                 ConversationMemory memory = new ConversationMemory();
                 memory.setConversationId(conversationId);
                 memory.setSession(conversationId); // Para compatibilidade
                 if (conversation.getOwner() != null) {
                     memory.setUserId(conversation.getOwner().getId());
                 }
-                // Converter Set<ChatMessage> para List<ChatMessage>
-                memory.setMessages(new ArrayList<>(conversation.getMessages()));
-                memory.setLastActivity(conversation.getLastActivity());
+                // Converter Set<ChatMessage> para List<ChatMessage
+                // Se não houver mensagens, a lista ficará vazia (válido)
+                if (conversation.getMessages() != null && !conversation.getMessages().isEmpty()) {
+                    memory.setMessages(new ArrayList<>(conversation.getMessages()));
+                } else {
+                    memory.setMessages(new ArrayList<>()); // Lista vazia para conversas sem mensagens
+                }
+                memory.setLastActivity(conversation.getLastActivity() != null 
+                    ? conversation.getLastActivity() 
+                    : conversation.getCreatedAt());
                 memory.setMaxMessages(defaultMaxMessages);
                 return memory;
-            });
+            })
+            .onFailure().recoverWithNull();
     }
 
     /**

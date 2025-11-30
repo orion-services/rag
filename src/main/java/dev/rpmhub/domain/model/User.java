@@ -7,6 +7,7 @@
  */
 package dev.rpmhub.domain.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -21,7 +22,7 @@ import java.util.Set;
  */
 @Entity
 @Table(name = "users")
-@Getter @Setter @ToString(exclude = {"passwordHash", "conversations", "ownedConversations"})
+@Getter @Setter @ToString(exclude = {"passwordHash", "ownedConversations"})
 public class User {
     
     @Id
@@ -34,6 +35,7 @@ public class User {
     @Column(unique = true, nullable = false)
     private String email;
     
+    @JsonIgnore
     @Column(name = "password_hash")
     private String passwordHash; // Para autenticação futura
     
@@ -46,11 +48,8 @@ public class User {
     @Column(name = "last_login")
     private LocalDateTime lastLogin;
     
-    // Relacionamento many-to-many com conversas
-    @ManyToMany(mappedBy = "participants", fetch = FetchType.LAZY)
-    private Set<Conversation> conversations = new HashSet<>();
-    
     // Relacionamento one-to-many: conversas criadas pelo usuário
+    @JsonIgnore
     @OneToMany(mappedBy = "owner", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private Set<Conversation> ownedConversations = new HashSet<>();
     

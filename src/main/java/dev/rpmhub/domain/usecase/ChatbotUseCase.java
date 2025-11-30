@@ -134,9 +134,13 @@ public class ChatbotUseCase {
                                                     .onItem().transform(list -> String.join("", list))
                                                     .onItem().call(response -> {
                                                         // Save assistant response to memory
-                                                        ChatMessage assistantMessage = new ChatMessage(userId, conversationId,
-                                                                response,
-                                                                ChatMessage.MessageType.ASSISTANT);
+                                                        // Mensagens ASSISTANT não devem ter userId
+                                                        ChatMessage assistantMessage = new ChatMessage();
+                                                        assistantMessage.setConversationId(conversationId);
+                                                        assistantMessage.setSessionId(conversationId); // Para compatibilidade
+                                                        assistantMessage.setContent(response);
+                                                        assistantMessage.setType(ChatMessage.MessageType.ASSISTANT);
+                                                        assistantMessage.setUserId(null); // Mensagens do assistente não têm userId
                                                         return memoryService.saveMessage(assistantMessage);
                                                     });
                                         });

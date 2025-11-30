@@ -23,7 +23,7 @@ public class UserRepositoryImpl implements PanacheRepositoryBase<User, String>, 
     
     @Override
     public Uni<User> findById(String id) {
-        return PanacheRepositoryBase.super.findById(id);
+        return find("id", id).firstResult();
     }
     
     @Override

@@ -17,9 +17,10 @@ import java.util.List;
  */
 public interface ConversationRepository {
     Uni<Conversation> findById(String id);
+    Uni<Conversation> findByIdWithMessages(String id);
+    Uni<List<Conversation>> findByIds(List<String> ids);
     Uni<List<Conversation>> findByUserId(String userId);
-    Uni<List<Conversation>> findSharedByUserId(String userId);
-    Uni<Conversation> findByIdWithParticipants(String conversationId);
+    Uni<List<Conversation>> findOwnedByUserId(String userId);
     Uni<Boolean> userHasAccess(String userId, String conversationId);
     Uni<Conversation> persist(Conversation conversation);
     Uni<Void> flush();

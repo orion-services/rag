@@ -11,6 +11,9 @@ import dev.rpmhub.domain.model.Conversation;
 import dev.rpmhub.domain.port.ConversationRepository;
 import dev.rpmhub.domain.port.ConversationService;
 import dev.rpmhub.domain.port.UserRepository;
+import io.quarkus.hibernate.reactive.panache.common.WithSession;
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
+import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,90 +37,85 @@ public class ConversationServiceImpl implements ConversationService {
     }
     
     @Override
+    @WithTransaction
     public Uni<Conversation> createConversation(String userId, String title) {
-        return userRepository.findById(userId)
-            .onItem().ifNull().failWith(() -> new IllegalArgumentException("Usuário não encontrado"))
-            .chain(user -> {
+        // O frontend envia o hash do Orion Users como userId
+        // Primeiro tentar buscar pelo hash do Orion Users (mais comum)
+        return userRepository.findByOrionUserHash(userId)
+            .onItem().ifNull().switchTo(() -> userRepository.findById(userId))
+            .onItem().ifNull().failWith(() -> new IllegalArgumentException("Usuário não encontrado. Certifique-se de que o usuário foi sincronizado do JWT token."))
+            .onItem().transformToUni(user -> {
                 Conversation conversation = new Conversation();
                 conversation.setTitle(title);
                 conversation.setOwner(user);
-                conversation.addParticipant(user);
                 return conversationRepository.persist(conversation)
-                    .chain(() -> conversationRepository.flush())
-                    .replaceWith(conversation);
+                    .onItem().transformToUni(persisted -> conversationRepository.flush().replaceWith(persisted));
             });
     }
     
     @Override
+    @WithSession
     public Uni<Conversation> getConversation(String conversationId) {
-        return conversationRepository.findByIdWithParticipants(conversationId)
+        return conversationRepository.findById(conversationId)
             .onItem().ifNull().failWith(() -> new IllegalArgumentException("Conversa não encontrada"));
     }
     
     @Override
+    @WithSession
     public Uni<List<Conversation>> getUserConversations(String userId) {
-        return conversationRepository.findByUserId(userId);
-    }
-    
-    @Override
-    public Uni<Void> shareConversation(String conversationId, String ownerId, String targetUserId) {
-        return conversationRepository.findById(conversationId)
-            .onItem().ifNull().failWith(() -> new IllegalArgumentException("Conversa não encontrada"))
-            .chain(conversation -> {
-                // Verificar se o usuário é o owner
-                if (!conversation.getOwner().getId().equals(ownerId)) {
-                    return Uni.createFrom().failure(new SecurityException("Apenas o dono pode compartilhar a conversa"));
+        // O frontend envia o hash do Orion Users como userId
+        // Primeiro tentar buscar pelo hash do Orion Users (mais comum)
+        return userRepository.findByOrionUserHash(userId)
+            .onItem().ifNull().switchTo(() -> userRepository.findById(userId))
+            .onItem().transformToUni(user -> {
+                if (user == null) {
+                    // Usuário não encontrado, pode estar sendo criado assincronamente
+                    // Retornar lista vazia em vez de erro
+                    Log.debug("Usuário não encontrado (ID ou hash: " + userId + "), retornando lista vazia.");
+                    return Uni.createFrom().item(List.<Conversation>of());
                 }
-                
-                return userRepository.findById(targetUserId)
-                    .onItem().ifNull().failWith(() -> new IllegalArgumentException("Usuário alvo não encontrado"))
-                    .chain(targetUser -> {
-                        conversation.addParticipant(targetUser);
-                        return conversationRepository.persist(conversation)
-                            .chain(() -> conversationRepository.flush())
-                            .replaceWithVoid();
-                    });
+                // Usuário encontrado, buscar conversações usando o ID real
+                Log.debug("Usuário encontrado, buscando conversações para ID: " + user.getId());
+                return conversationRepository.findOwnedByUserId(user.getId());
+            })
+            .onFailure().recoverWithItem(e -> {
+                Log.error("Erro ao buscar conversações para usuário " + userId + ": " + e.getMessage(), e);
+                return List.<Conversation>of();
             });
     }
     
     @Override
-    public Uni<Void> removeParticipant(String conversationId, String ownerId, String targetUserId) {
-        return conversationRepository.findById(conversationId)
-            .onItem().ifNull().failWith(() -> new IllegalArgumentException("Conversa não encontrada"))
-            .chain(conversation -> {
-                if (!conversation.getOwner().getId().equals(ownerId)) {
-                    return Uni.createFrom().failure(new SecurityException("Apenas o dono pode remover participantes"));
-                }
-                
-                if (conversation.getOwner().getId().equals(targetUserId)) {
-                    return Uni.createFrom().failure(new IllegalArgumentException("Não é possível remover o dono da conversa"));
-                }
-                
-                return userRepository.findById(targetUserId)
-                    .chain(targetUser -> {
-                        conversation.removeParticipant(targetUser);
-                        return conversationRepository.persist(conversation)
-                            .chain(() -> conversationRepository.flush())
-                            .replaceWithVoid();
-                    });
-            });
-    }
-    
-    @Override
+    @WithSession
     public Uni<Boolean> userHasAccess(String userId, String conversationId) {
-        return conversationRepository.userHasAccess(userId, conversationId);
+        // O userId pode ser tanto orionUserHash quanto id do usuário
+        // Primeiro tentar buscar pelo hash do Orion Users (mais comum)
+        return userRepository.findByOrionUserHash(userId)
+            .onItem().ifNull().switchTo(() -> userRepository.findById(userId))
+            .onItem().transformToUni(user -> {
+                if (user == null) {
+                    // Usuário não encontrado, retornar false
+                    return Uni.createFrom().item(false);
+                }
+                // Usar o ID real do usuário para verificar acesso
+                return conversationRepository.userHasAccess(user.getId(), conversationId);
+            })
+            .onFailure().recoverWithItem(e -> {
+                Log.error("Erro ao verificar acesso do usuário " + userId + " à conversa " + conversationId, e);
+                return false;
+            });
     }
     
     @Override
+    @WithTransaction
     public Uni<Void> deleteConversation(String conversationId, String userId) {
-        return conversationRepository.findById(conversationId)
-            .onItem().ifNull().failWith(() -> new IllegalArgumentException("Conversa não encontrada"))
-            .chain(conversation -> {
-                if (!conversation.getOwner().getId().equals(userId)) {
+        // Verificar se o usuário tem acesso antes de deletar
+        return conversationRepository.userHasAccess(userId, conversationId)
+            .onItem().transformToUni(hasAccess -> {
+                if (!hasAccess) {
                     return Uni.createFrom().failure(new SecurityException("Apenas o dono pode deletar a conversa"));
                 }
                 return conversationRepository.deleteById(conversationId)
-                    .chain(deleted -> {
+                    .onItem().transformToUni(deleted -> {
                         if (!deleted) {
                             return Uni.createFrom().failure(new IllegalArgumentException("Conversa não encontrada"));
                         }

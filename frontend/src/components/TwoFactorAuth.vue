@@ -73,7 +73,9 @@ export default {
         const response = await orionUsersService.loginWith2FA(this.email, this.code);
 
         if (response.authentication && response.authentication.token) {
-          this.$emit('authenticated', response.authentication.token, response.user);
+          // Usuário está dentro de authentication, não em response.user
+          const user = response.authentication.user;
+          this.$emit('authenticated', response.authentication.token, user);
         } else {
           this.error = 'Código inválido. Tente novamente.';
         }

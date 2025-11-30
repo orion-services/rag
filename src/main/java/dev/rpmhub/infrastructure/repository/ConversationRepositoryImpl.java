@@ -23,31 +23,40 @@ public class ConversationRepositoryImpl implements PanacheRepositoryBase<Convers
     
     @Override
     public Uni<Conversation> findById(String id) {
-        return PanacheRepositoryBase.super.findById(id);
+        return find("id", id).firstResult();
+    }
+    
+    @Override
+    public Uni<Conversation> findByIdWithMessages(String id) {
+        // Usar fetch join para carregar a coleção messages junto com a conversa
+        return find("SELECT c FROM Conversation c LEFT JOIN FETCH c.messages WHERE c.id = ?1", id).firstResult();
+    }
+    
+    @Override
+    public Uni<List<Conversation>> findByIds(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Uni.createFrom().item(List.of());
+        }
+        // Usar uma query simples com IN para buscar múltiplas conversações
+        return find("id IN (?1)", ids).list();
+    }
+    
+    @Override
+    public Uni<List<Conversation>> findOwnedByUserId(String userId) {
+        // Usar API Panache com owner.id - não faz JOIN quando acessa apenas o ID
+        return list("owner.id", userId);
     }
     
     @Override
     public Uni<List<Conversation>> findByUserId(String userId) {
-        return find("SELECT DISTINCT c FROM Conversation c LEFT JOIN FETCH c.participants p WHERE p.id = ?1 OR c.owner.id = ?1", userId)
-            .list();
-    }
-    
-    @Override
-    public Uni<List<Conversation>> findSharedByUserId(String userId) {
-        return find("SELECT DISTINCT c FROM Conversation c LEFT JOIN FETCH c.participants p WHERE p.id = ?1 AND c.shared = true", userId)
-            .list();
-    }
-    
-    @Override
-    public Uni<Conversation> findByIdWithParticipants(String conversationId) {
-        return find("SELECT c FROM Conversation c LEFT JOIN FETCH c.participants WHERE c.id = ?1", conversationId)
-            .firstResult();
+        // Buscar conversações onde o usuário é owner
+        return findOwnedByUserId(userId);
     }
     
     @Override
     public Uni<Boolean> userHasAccess(String userId, String conversationId) {
-        return count("SELECT COUNT(c) FROM Conversation c WHERE c.id = ?1 AND (c.owner.id = ?2 OR EXISTS (SELECT 1 FROM c.participants p WHERE p.id = ?2))", 
-                     conversationId, userId)
+        // Usar API Panache para verificar acesso
+        return count("id = ?1 and owner.id = ?2", conversationId, userId)
             .map(count -> count > 0);
     }
     

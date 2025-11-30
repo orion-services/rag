@@ -7,6 +7,7 @@
  */
 package dev.rpmhub.domain.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -17,11 +18,11 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Represents a conversation that can be shared among multiple users.
+ * Represents a conversation owned by a single user.
  */
 @Entity
 @Table(name = "conversations")
-@Getter @Setter @ToString(exclude = {"participants", "messages"})
+@Getter @Setter @ToString(exclude = {"messages"})
 public class Conversation {
     
     @Id
@@ -41,19 +42,8 @@ public class Conversation {
     @Column(name = "last_activity", nullable = false)
     private LocalDateTime lastActivity;
     
-    @Column(name = "is_shared", nullable = false)
-    private boolean shared = false;
-    
-    // Relacionamento many-to-many: usuários participantes
-    @ManyToMany(fetch = FetchType.LAZY)
-    @JoinTable(
-        name = "conversation_participants",
-        joinColumns = @JoinColumn(name = "conversation_id"),
-        inverseJoinColumns = @JoinColumn(name = "user_id")
-    )
-    private Set<User> participants = new HashSet<>();
-    
     // Relacionamento one-to-many: mensagens da conversa
+    @JsonIgnore
     @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("timestamp ASC")
     private Set<ChatMessage> messages = new HashSet<>();
@@ -66,38 +56,11 @@ public class Conversation {
         if (lastActivity == null) {
             lastActivity = LocalDateTime.now();
         }
-        // Adiciona o owner como participante
-        if (participants == null) {
-            participants = new HashSet<>();
-        }
-        if (owner != null && !participants.contains(owner)) {
-            participants.add(owner);
-        }
     }
     
     @PreUpdate
     protected void onUpdate() {
         lastActivity = LocalDateTime.now();
-    }
-    
-    public void addParticipant(User user) {
-        if (participants == null) {
-            participants = new HashSet<>();
-        }
-        participants.add(user);
-        shared = participants.size() > 1;
-    }
-    
-    public void removeParticipant(User user) {
-        if (participants != null) {
-            participants.remove(user);
-            shared = participants.size() > 1;
-        }
-    }
-    
-    public boolean hasParticipant(String userId) {
-        return participants != null && 
-               participants.stream().anyMatch(u -> u.getId().equals(userId));
     }
 }
 

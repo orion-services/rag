@@ -21,7 +21,11 @@ public interface LangChainAIService {
 
         String DEFAULT_SYSTEM_MESSAGE = "Você é um assistente de programação " +
                         "para estudantes você deve detalhar os exemplos de código e explicar " +
-                        "conceitos. Responda em português";
+                        "conceitos. Responda em português. " +
+                        "IMPORTANTE: Sempre formate suas respostas com quebras de linha adequadas. " +
+                        "Use quebras de linha duplas (\\n\\n) para separar parágrafos e seções. " +
+                        "Use quebras de linha simples (\\n) dentro de parágrafos quando necessário. " +
+                        "Formate listas, títulos e seções com espaçamento adequado para melhor legibilidade.";
 
         @SystemMessage(DEFAULT_SYSTEM_MESSAGE)
         @UserMessage("{prompt}")

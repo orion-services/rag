@@ -19,8 +19,6 @@ public interface ConversationService {
     Uni<Conversation> createConversation(String userId, String title);
     Uni<Conversation> getConversation(String conversationId);
     Uni<List<Conversation>> getUserConversations(String userId);
-    Uni<Void> shareConversation(String conversationId, String ownerId, String targetUserId);
-    Uni<Void> removeParticipant(String conversationId, String ownerId, String targetUserId);
     Uni<Boolean> userHasAccess(String userId, String conversationId);
     Uni<Void> deleteConversation(String conversationId, String userId);
 }
