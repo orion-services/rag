@@ -19,6 +19,7 @@ import dev.rpmhub.domain.model.RagQuery;
 import dev.rpmhub.domain.model.RagResponse;
 import dev.rpmhub.domain.port.EmbeddingRepository;
 import dev.rpmhub.infrastructure.service.PDFExtractorService;
+import dev.rpmhub.infrastructure.util.BlockingToReactive;
 import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Multi;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -60,25 +61,29 @@ public class EmbeddingRepositoryImpl implements EmbeddingRepository {
          */
         @Override
         public Multi<RagResponse> searchChunks(RagQuery query) {
-                return Multi.createFrom().item(query)
-                                .emitOn(io.quarkus.runtime.ExecutorRecorder.getCurrent())
-                                .map(ragQuery -> {
-                                        EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
-                                                        .queryEmbedding(embeddingModel.embed(ragQuery.getQuery())
-                                                                        .content())
-                                                        .minScore(ragQuery.getMinScore())
-                                                        .maxResults(ragQuery.getMaxResults())
-                                                        .build();
+                // Use wrapper to execute blocking operations (embedding + search) on executor thread
+                // and emit result back on EventLoop thread
+                return BlockingToReactive.wrap(() -> {
+                        // These operations are blocking:
+                        // 1. embeddingModel.embed() - ML model processing
+                        // 2. embeddingStore.search() - Database query to Chroma
+                        EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
+                                        .queryEmbedding(embeddingModel.embed(query.getQuery())
+                                                        .content())
+                                        .minScore(query.getMinScore())
+                                        .maxResults(query.getMaxResults())
+                                        .build();
 
-                                        var matches = embeddingStore.search(searchRequest).matches();
-                                        var contexts = matches.stream()
-                                                        .map(match -> match.embedded().text())
-                                                        .toList();
+                        var matches = embeddingStore.search(searchRequest).matches();
+                        var contexts = matches.stream()
+                                        .map(match -> match.embedded().text())
+                                        .toList();
 
-                                        double score = matches.isEmpty() ? 0.0 : matches.get(0).score();
+                        double score = matches.isEmpty() ? 0.0 : matches.get(0).score();
 
-                                        return new RagResponse(ragQuery.getQuery(), contexts, score);
-                                });
+                        return new RagResponse(query.getQuery(), contexts, score);
+                })
+                .toMulti();
         }
 
         /**

@@ -21,7 +21,9 @@ import lombok.ToString;
 @Getter @Setter @ToString
 public class ConversationMemory {
 
-    private String session;
+    private String userId;        // NOVO
+    private String conversationId; // NOVO
+    private String session;        // Mantido para compatibilidade
     private List<ChatMessage> messages;
     private LocalDateTime lastActivity;
     private int maxMessages;
@@ -35,10 +37,23 @@ public class ConversationMemory {
     public ConversationMemory(String session) {
         this();
         this.session = session;
+        this.conversationId = session; // Para compatibilidade
+    }
+    
+    public ConversationMemory(String userId, String conversationId) {
+        this();
+        this.userId = userId;
+        this.conversationId = conversationId;
+        this.session = conversationId; // Para compatibilidade
     }
 
     public ConversationMemory(String session, int maxMessages) {
         this(session);
+        this.maxMessages = maxMessages;
+    }
+    
+    public ConversationMemory(String userId, String conversationId, int maxMessages) {
+        this(userId, conversationId);
         this.maxMessages = maxMessages;
     }
 

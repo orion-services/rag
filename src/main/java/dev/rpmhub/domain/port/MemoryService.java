@@ -14,12 +14,14 @@ import io.smallrye.mutiny.Uni;
 import java.util.List;
 
 /**
- * Port for managing conversation memory using Redis with reactive operations.
+ * Port for managing conversation memory using MySQL + Redis hybrid approach.
+ * MySQL for persistence, Redis for cache/performance.
  */
 public interface MemoryService {
 
     /**
      * Saves a chat message to the conversation memory.
+     * Uses MySQL for persistence and Redis for cache.
      *
      * @param message the message to save
      * @return a Uni that completes when the message is saved
@@ -28,44 +30,92 @@ public interface MemoryService {
 
     /**
      * Retrieves the conversation memory for a specific session.
+     * Tries Redis cache first, falls back to MySQL if not found.
      *
-     * @param sessionId the session identifier
+     * @param sessionId the session identifier (for backward compatibility)
      * @return a Uni containing the conversation memory, or null if not found
      */
     Uni<ConversationMemory> getConversationMemory(String sessionId);
+    
+    /**
+     * Retrieves the conversation memory for a specific conversation.
+     * Tries Redis cache first, falls back to MySQL if not found.
+     *
+     * @param userId the user identifier
+     * @param conversationId the conversation identifier
+     * @return a Uni containing the conversation memory, or null if not found
+     */
+    Uni<ConversationMemory> getConversationMemory(String userId, String conversationId);
 
     /**
      * Gets the last N messages from a conversation.
      *
-     * @param sessionId the session identifier
+     * @param sessionId the session identifier (for backward compatibility)
      * @param count     the number of messages to retrieve
      * @return a Uni containing list of the last N messages
      */
     Uni<List<ChatMessage>> getLastMessages(String sessionId, int count);
+    
+    /**
+     * Gets the last N messages from a conversation.
+     *
+     * @param userId the user identifier
+     * @param conversationId the conversation identifier
+     * @param count     the number of messages to retrieve
+     * @return a Uni containing list of the last N messages
+     */
+    Uni<List<ChatMessage>> getLastMessages(String userId, String conversationId, int count);
 
     /**
      * Gets the conversation history as a formatted string.
      *
-     * @param sessionId the session identifier
+     * @param sessionId the session identifier (for backward compatibility)
      * @return a Uni containing the conversation history
      */
     Uni<String> getHistory(String sessionId);
+    
+    /**
+     * Gets the conversation history as a formatted string.
+     *
+     * @param userId the user identifier
+     * @param conversationId the conversation identifier
+     * @return a Uni containing the conversation history
+     */
+    Uni<String> getHistory(String userId, String conversationId);
 
     /**
      * Clears the conversation memory for a specific session.
      *
-     * @param sessionId the session identifier
+     * @param sessionId the session identifier (for backward compatibility)
      * @return a Uni that completes when the conversation is cleared
      */
     Uni<Void> clearConversation(String sessionId);
+    
+    /**
+     * Clears the conversation memory for a specific conversation.
+     *
+     * @param userId the user identifier
+     * @param conversationId the conversation identifier
+     * @return a Uni that completes when the conversation is cleared
+     */
+    Uni<Void> clearConversation(String userId, String conversationId);
 
     /**
      * Checks if a conversation exists for the given session.
      *
-     * @param sessionId the session identifier
+     * @param sessionId the session identifier (for backward compatibility)
      * @return a Uni containing true if conversation exists, false otherwise
      */
     Uni<Boolean> hasConversation(String sessionId);
+    
+    /**
+     * Checks if a conversation exists for the given user and conversation.
+     *
+     * @param userId the user identifier
+     * @param conversationId the conversation identifier
+     * @return a Uni containing true if conversation exists, false otherwise
+     */
+    Uni<Boolean> hasConversation(String userId, String conversationId);
 
     /**
      * Sets the maximum number of messages to keep in memory for a session.

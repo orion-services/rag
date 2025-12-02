@@ -56,7 +56,7 @@ public class ChatbotUseCase {
     }
 
     /**
-     * Executes the use case to interact with the chatbot.
+     * Executes the use case to interact with the chatbot (backward compatibility).
      *
      * @param session the session ID
      * @param prompt  the user prompt
@@ -92,6 +92,55 @@ public class ChatbotUseCase {
                                                         ChatMessage assistantMessage = new ChatMessage(session,
                                                                 response,
                                                                 ChatMessage.MessageType.ASSISTANT);
+                                                        return memoryService.saveMessage(assistantMessage);
+                                                    });
+                                        });
+                            });
+                });
+    }
+    
+    /**
+     * Executes the use case to interact with the chatbot with user and conversation.
+     *
+     * @param userId the user ID
+     * @param conversationId the conversation ID
+     * @param prompt  the user prompt
+     * @return a Multi emitting the chatbot response
+     */
+    public Multi<String> execute(String userId, String conversationId, String prompt) {
+        Log.info("Executing ChatbotUseCase for user: " + userId + ", conversation: " + conversationId + " with prompt: " + prompt);
+        // Save user message to memory
+        ChatMessage userMessage = new ChatMessage(userId, conversationId, prompt, ChatMessage.MessageType.USER);
+
+        return memoryService.saveMessage(userMessage)
+                .onItem().invoke(() -> Log.info("Saved user message for conversation: " + conversationId))
+                .onItem().transformToMulti(ignored -> {
+                    RagQuery query = new RagQuery(prompt, 1, 0.7);
+
+                    return embeddingRepository.searchChunks(query)
+                            .flatMap(ragResponse -> {
+                                String context = ragResponse.getContexts().isEmpty()
+                                        ? DEFAULT_CONTEXT
+                                        : ragResponse.getFirstContext();
+
+                                Log.info("Context: " + context);
+
+                                // Get conversation history for context
+                                return memoryService.getHistory(userId, conversationId)
+                                        .onItem().transformToMulti(history -> {
+                                            AIRequest aiRequest = new AIRequest(conversationId, prompt, context, history);
+                                            return aiService.generateContextualResponse(aiRequest)
+                                                    .group().intoLists().of(20)
+                                                    .onItem().transform(list -> String.join("", list))
+                                                    .onItem().call(response -> {
+                                                        // Save assistant response to memory
+                                                        // Mensagens ASSISTANT não devem ter userId
+                                                        ChatMessage assistantMessage = new ChatMessage();
+                                                        assistantMessage.setConversationId(conversationId);
+                                                        assistantMessage.setSessionId(conversationId); // Para compatibilidade
+                                                        assistantMessage.setContent(response);
+                                                        assistantMessage.setType(ChatMessage.MessageType.ASSISTANT);
+                                                        assistantMessage.setUserId(null); // Mensagens do assistente não têm userId
                                                         return memoryService.saveMessage(assistantMessage);
                                                     });
                                         });
